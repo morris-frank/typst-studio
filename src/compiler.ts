@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { TypstPluginSettings } from "./settings";
@@ -166,6 +166,40 @@ export function rewriteWikiLinks(markdown: string, vaultName: string): string {
   );
 }
 
+/**
+ * Turn a code span naming a vault file (`` `meetings/2026-09-28 Sync.md` ``)
+ * into an `obsidian://open` link, so the PDF points into the vault rather than
+ * printing a path that only means something on this machine.
+ */
+export function linkVaultPaths(
+  markdown: string,
+  vaultName: string,
+  vaultRoot: string,
+): string {
+  return markdown.replace(
+    /(?<![`\[])`([^`\n]+\.[A-Za-z0-9]+)`(?!`)/g,
+    (whole, p: string) => {
+      if (!existsSync(path.join(vaultRoot, p))) return whole;
+      const file = p.replace(/\.md$/i, "");
+      const query = `vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(file)}`;
+      return `[${whole}](obsidian://open?${query})`;
+    },
+  );
+}
+
+/**
+ * Obsidian's custom task states (`- [?]`, `- [!]`, `- [i]`, …) are not task
+ * items to pandoc and would print as `[?]`. Emit a raw `#task-mark` instead,
+ * which `wrapTaskLists` groups with ordinary task items.
+ */
+export function rewriteTaskStates(markdown: string): string {
+  return markdown.replace(
+    /^([ \t]*[-*+] )\[([^ xX\]])\] /gm,
+    (_whole, head: string, c: string) =>
+      `${head}\`#task-mark(${typstStringLiteral(c)})\`{=typst} `,
+  );
+}
+
 const CALLOUT_HEAD = /^([ \t]*)>[ \t]*\[!([A-Za-z][\w-]*)\][+-]?[ \t]*(.*)$/;
 
 /**
@@ -217,11 +251,17 @@ export function rewriteCallouts(markdown: string): string {
 // pandoc emits the task-list checkbox either as the literal glyph or, since
 // 3.11, as a Typst unicode escape (`\u{2610}` / `\u{2612}`). Match both, or a
 // pandoc upgrade silently turns every task list back into dashes and boxes.
-const TASK_MARK = String.raw`(?:[\u2610\u2612]|\\u\{261[02]\})`;
+const TASK_MARK = String.raw`(?:[\u2610\u2612]|\\u\{261[02]\}|#task-mark\()`;
 const TASK_BLOCK = new RegExp(
   String.raw`^(?:[ \t]*- ${TASK_MARK}[^\n]*\n(?:[ \t]+\S[^\n]*\n)*)+`,
   "gm",
 );
+
+// A custom task state drawn as a checkbox holding its glyph (`?`, `!`, `i`…).
+const TASK_MARK_DEF =
+  "#let task-mark(c) = box(width: 0.8em, height: 0.8em, baseline: 0.1em, " +
+  "radius: 1pt, stroke: 1.2pt + luma(110), inset: 0pt, align(center + horizon, " +
+  'text(size: 0.6em, weight: 700)[#if c == "-" { sym.dash.en } else { c }])) + h(0.4em)';
 
 /**
  * Route pandoc's non-default enum numbering (`A.`, `i.`, …) through the
@@ -515,6 +555,7 @@ export async function compileMarkdown(
   outPdfAbs: string,
   settings: TypstPluginSettings,
   vaultName: string,
+  vaultRoot: string,
 ): Promise<{ pdfPath: string; mermaidFailures: string[] }> {
   await ensureDir(path.dirname(outPdfAbs));
   const stem = `.${path.basename(sourceAbs, path.extname(sourceAbs))}`;
@@ -540,6 +581,7 @@ export async function compileMarkdown(
   // wiki links become `obsidian://` links, callouts become `#admonition`.
   let body = sourceMarkdown.replace(/^---\n[\s\S]*?\n---\n?/, "");
   body = rewriteCallouts(rewriteWikiLinks(body, vaultName));
+  body = rewriteTaskStates(linkVaultPaths(body, vaultName, vaultRoot));
   // Mermaid runs before pandoc so the fence is gone by the time pandoc sees
   // the body; its SVGs and the wrapper are removed together at the end.
   const mermaid = await renderMermaid(body, sourceAbs, settings);
@@ -550,7 +592,9 @@ export async function compileMarkdown(
   };
   const pandoc = await run(
     settings.pandocPath,
-    ["--from=markdown", "--to=typst", "--wrap=preserve"],
+    // Obsidian links bare URLs; without the extension pandoc prints them as
+    // plain, unclickable text.
+    ["--from=markdown+autolink_bare_uris", "--to=typst", "--wrap=preserve"],
     { input: body, cwd: path.dirname(sourceAbs) },
   );
   if (pandoc.code !== 0) {
@@ -574,6 +618,12 @@ export async function compileMarkdown(
     `#show: ${templateFunction}.with(`,
     `  ${args}`,
     `)`,
+    "",
+    // pandoc wraps tables in an unbreakable, centred figure: a long table then
+    // runs through the footer instead of continuing on the next page.
+    "#show figure.where(kind: table): set block(breakable: true)",
+    "#show table: set align(start)",
+    TASK_MARK_DEF,
     "",
     styleEnumNumbering(wrapTaskLists(pandoc.stdout)),
   ].join("\n");

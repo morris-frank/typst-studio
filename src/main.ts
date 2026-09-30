@@ -116,6 +116,7 @@ export default class TypstPlugin extends Plugin {
           outPdf,
           this.settings,
           this.app.vault.getName(),
+          base,
         ));
       }
       notice.hide();
