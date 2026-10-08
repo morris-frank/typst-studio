@@ -153,7 +153,13 @@ function markdownLinkText(value: string): string {
 export function rewriteWikiLinks(markdown: string, vaultName: string): string {
   return markdown.replace(
     /!?\[\[([^\]|#\n]+?)(?:#([^\]|\n]*))?(?:\|([^\]\n]*))?\]\]/g,
-    (_whole, target: string, anchor: string | undefined, alias) => {
+    (whole: string, target: string, anchor: string | undefined, alias) => {
+      // An image embed renders as the image itself, resolved beside the note.
+      if (
+        whole.startsWith("!") &&
+        /\.(png|jpe?g|gif|svg|webp)$/i.test(target.trim())
+      )
+        return `\`\`\`{=typst}\n#figure(image(${typstStringLiteral(target.trim())}, width: 100%))\n\`\`\``;
       const file = target.trim().replace(/\.md$/i, "");
       const heading = anchor?.trim();
       const label =
