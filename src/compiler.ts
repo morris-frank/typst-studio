@@ -599,8 +599,13 @@ export async function compileMarkdown(
   const pandoc = await run(
     settings.pandocPath,
     // Obsidian links bare URLs; without the extension pandoc prints them as
-    // plain, unclickable text.
-    ["--from=markdown+autolink_bare_uris", "--to=typst", "--wrap=preserve"],
+    // plain, unclickable text. Citations are off: Obsidian has none, and
+    // `@2x` or `@theme` would otherwise become #cite with no bibliography.
+    [
+      "--from=markdown+autolink_bare_uris-citations",
+      "--to=typst",
+      "--wrap=preserve",
+    ],
     { input: body, cwd: path.dirname(sourceAbs) },
   );
   if (pandoc.code !== 0) {
