@@ -43,9 +43,24 @@ const ctx = await esbuild.context({
   minify: production,
 });
 
+// Terminal entry point (`mise run link` puts it on ~/bin): same compiler,
+// run by node instead of Obsidian.
+const cli = await esbuild.context({
+  banner: { js: `#!/usr/bin/env node\n${banner}` },
+  entryPoints: ["src/cli.ts"],
+  bundle: true,
+  loader: { ".typ": "text" },
+  platform: "node",
+  format: "cjs",
+  target: "es2022",
+  logLevel: "info",
+  outfile: "cli.cjs",
+});
+
 if (production) {
   await ctx.rebuild();
+  await cli.rebuild();
   process.exit(0);
 } else {
-  await ctx.watch();
+  await Promise.all([ctx.watch(), cli.watch()]);
 }

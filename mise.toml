@@ -44,6 +44,14 @@ run = "pnpm run dev"
 description = "Type-check and produce the production main.js bundle"
 run = "pnpm run build"
 
+[tasks.link]
+description = "Build and symlink the typst-studio CLI into ~/bin"
+run = [
+  "pnpm run build",
+  "chmod +x cli.cjs",
+  "ln -sf \"$PWD/cli.cjs\" ~/bin/typst-studio",
+]
+
 [tasks.lint]
 run = "pnpm run lint"
 

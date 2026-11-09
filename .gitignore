@@ -1,6 +1,7 @@
 # Build output (bundled plugin artifact — rebuilt from src/)
 main.js
 main.js.map
+cli.cjs
 
 # Dependencies
 node_modules/
